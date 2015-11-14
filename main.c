@@ -35,6 +35,9 @@ int main(void) {
     P1IE |= BIT0 + BIT1;
     P1OUT = 0;
 
+    __delay_cycles(250000);
+    P1IFG = 0;
+
     __enable_interrupt();
 
 
@@ -90,16 +93,6 @@ __interrupt void something(void) {
 	timeCounter++;
 }
 
-
-long rollDiff(long cur, long prev) {
-	if(cur > prev) {
-		return cur - prev;
-	}
-	else {
-		return 0xFFFF + cur - prev;
-	}
-}
-
 #pragma vector=PORT1_VECTOR
 __interrupt void button(void) {
 	if(P1IFG & BIT0) { //rising edge
@@ -110,6 +103,7 @@ __interrupt void button(void) {
 	}
 	else if(P1IFG & BIT1) { // falling edge
 		if(done) {
+			timeCounter = 0;
 			return;
 		}
 		long diff = timeCounter;
