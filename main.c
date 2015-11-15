@@ -31,9 +31,16 @@ int main(void) {
     TACCR0 = 100;
 
     P1DIR |= BIT6;
-    P1IES |= BIT1;   //  This sets P1.1 to falling edge, and P1.0 to rising edge
+
+   // P1REN |= BIT0 + BIT1; // enable resistors on P1.1 and P1.0
+   // P1OUT |= BIT1;  // use a pull-up resistor on P1.1
+   // P1OUT &= ~BIT0;  // use a pull-down resistor on P1.0
+
+    P1IES |= BIT1;   //  This sets P1.1 to trigger on a falling edge.
+    P1IES &= ~BIT0;  //  This sets P1.0 to trigger on a rising edge
     P1IE |= BIT0 + BIT1;
-    P1OUT = 0;
+
+    P1DIR |= BIT4;
 
     __delay_cycles(250000);
     P1IFG = 0;
@@ -48,9 +55,13 @@ int main(void) {
     // 0x20DFC03F == volume down
 
     while(1) {
+    	int temp = P1IFG;
+    	temp = temp;
+    	P1IFG = 0;
         while(index < 32)
         	;
         index = 0;
+        done = 1;
 
         switch(buf) {
         case CHANNEL_UP:
@@ -72,9 +83,7 @@ int main(void) {
         	break;
 
         case VOLUME_DOWN:
-        	P1OUT |= BIT6;
-        	__delay_cycles(500000);
-        	P1OUT &= ~BIT6;
+        	P1OUT ^= BIT6;
         	break;
         default:
         	//error
@@ -95,17 +104,18 @@ __interrupt void something(void) {
 
 #pragma vector=PORT1_VECTOR
 __interrupt void button(void) {
-	if(P1IFG & BIT0) { //rising edge
+	P1OUT |= BIT4;
+	if(P1IFG & BIT0 && P1IFG & BIT1) {
+		// error condition. should not be both high at same time.
+		P1OUT ^= BIT6;
+	}
+	else if(P1IFG & BIT0) { //rising edge
 		if(done) {
 			done = 0;
 		}
 		timeCounter = 0;
 	}
-	else if(P1IFG & BIT1) { // falling edge
-		if(done) {
-			timeCounter = 0;
-			return;
-		}
+	else if(P1IFG & BIT1 && !done) { // falling edge
 		long diff = timeCounter;
 
 		if(diff < 8) {
@@ -130,6 +140,8 @@ __interrupt void button(void) {
 			index = 0;
 		}
 	}
+	__delay_cycles(100); // Delay a short bit just to prevent possible unintended edge triggerings
+	P1OUT &= ~BIT4;
 	P1IFG = 0;
 }
 
