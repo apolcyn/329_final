@@ -10,12 +10,13 @@
 #define ms_1point50  49    // 1.50 ms
 #define ms_2point25  73    // 2.25 ms
 
-int duty_cycles[] = {ms_0point75, ms_1point50, ms_2point25};
+#define RESET_COUNT = 30000
 
 int done = 1;
 long buf = 0;
 int index = 0;
 long timeCounter = 0;
+long resetCounter = 0;
 
 #define SERVO_PERIOD_COUNTS 400
 
@@ -52,7 +53,7 @@ int main(void) {
 
     CCTL0 |= CCIE;
     TACTL = TASSEL_2 + MC_1;
-    TACCR0 = 100;
+    TACCR0 = 700;
 
     P1DIR |= BIT6;                        // UsingP1.6 for LED.
 
@@ -61,6 +62,7 @@ int main(void) {
     P1IE |= BIT0 + BIT1;
 
     P1DIR |= BIT5;
+    P1DIR |= BIT3; // bit to look at amount of time taken by ISR's
 
     __delay_cycles(250000);
     P1IFG = 0;                            // Clear out unintended GPIO triggerings.
@@ -73,23 +75,19 @@ int main(void) {
     buf = 0;                          // Reset buffer.
         while(index < 32)                 // Sit here until we decode a 32-bit instruction
         ;                             // from TV remote.
-        index = 0;                        // Reset index, and set flag to indicate
         done = 1;                         // that the next faling edge is not a data bit.
 
         switch(buf) {                     // Perform some action based on the code
         case CHANNEL_UP:                  // sent by the TV remote.
             set_servo_length(SERVO_MINUS_30);
-        //shift_servo(duty_cycles[0]);
         break;
 
         case CHANNEL_DOWN:
             set_servo_length(SERVO_NEUTRAL);
-        //shift_servo(duty_cycles[1]);
         break;
 
         case VOLUME_UP:
             set_servo_length(SERVO_PLUS_30);
-        //shift_servo(duty_cycles[2]);
         break;
 
         case VOLUME_DOWN:
@@ -100,6 +98,7 @@ int main(void) {
         break;
         }
     }
+    P1IFG = 0;
 
 return 0;
 }
@@ -107,16 +106,23 @@ return 0;
 /* Increments timeCounter, which counts up with a 100us period. Used to decode IR. */
 #pragma vector=TIMER0_A0_VECTOR
 __interrupt void something(void) {
-timeCounter++;
-if(servo_on) {
-   if(servo_count++ == low_servo) {
-       P1OUT &= ~BIT5;
-   }
-   else if(servo_count++ >= SERVO_PERIOD_COUNTS) {
-       servo_count = 0;
-       P1OUT |= BIT5;
-   }
-}
+    P1OUT |= BIT3;
+    timeCounter++;
+    if(servo_on) {
+        if(servo_count++ == low_servo) {
+            P1OUT &= ~BIT5;
+        }
+        else if(servo_count++ >= SERVO_PERIOD_COUNTS) {
+            servo_count = 0;
+            P1OUT |= BIT5;
+        }
+    }
+    if(resetCounter++ == 30000) {
+        index = 0;
+        buf = 0;
+        resetCounter = 0;
+    }
+    P1OUT &= ~BIT3;
 }
 
 /* Reads the next data bit from IR sensor and stores it in a buffer.
@@ -124,38 +130,38 @@ if(servo_on) {
  */
 #pragma vector=PORT1_VECTOR
 __interrupt void button(void) {
-if(P1IFG & BIT0 && P1IFG & BIT1) {    // Check error condition.
-P1OUT ^= BIT6;                    // Shouldn't have interrupts for both high to low
-__delay_cycles(250000);           // and low to high transitions.
-P1OUT ^= BIT6;                    // Toggle LED to indicate error.
-__delay_cycles(250000);
-P1OUT ^= BIT6;
-}
-else if(P1IFG & BIT0) {               // Rising edge from IR receiver digital output.
-if(done) {                        // Indicate that subsequent edges are of interest.
-done = 0;
-}
-timeCounter = 0;                  // Reset time counter to zero on rising edge.
-}
-else if(P1IFG & BIT1 && !done) {      // Falling edge from IR receiver digital output.
-long diff = timeCounter;          // See how many 100us periods have gone by since
+    if(P1IFG & BIT0 && P1IFG & BIT1) {    // Check error condition.
+        P1OUT ^= BIT6;                    // Shouldn't have interrupts for both high to low
+        __delay_cycles(250000);           // and low to high transitions.
+        P1OUT ^= BIT6;                    // Toggle LED to indicate error.
+        __delay_cycles(250000);
+        P1OUT ^= BIT6;
+    }
+    else if(P1IFG & BIT0) {               // Rising edge from IR receiver digital output.
+        if(done) {                        // Indicate that subsequent edges are of interest.
+            done = 0;
+        }
+        timeCounter = 0;                  // Reset time counter to zero on rising edge.
+    }
+    else if(P1IFG & BIT1 && !done) {      // Falling edge from IR receiver digital output.
+        long diff = timeCounter;          // See how many 100us periods have gone by since
                                           // the previous rising edge.
-if(diff < 8) {                    // This high signal was less than 800us long,                          // '0'
-index++;                      // which inidicates a '0' with NEC protocol.
-buf <<= 1;                    // Add in a '0' bit to the buffer.
-}
-else if(diff < 20) {              // This high signal is between 800us and 2ms,
-index++;                      // which inidicates a '1' bt by NEC protocol.
-buf <<= 1;                    // Add in a '1' bit to the buffer.
-buf |= 1;
-}
-else if(diff < 60) {              // This high signal is between 2ms and 6ms,
-if(buf | index != 0) {        // which inidicates that this was the data header.
-P1OUT |= BIT6;            // If buffer and index and not both set to zero,
-}                             // then this is an error condition, as these should
-}                                 // be reset before data capture.
-}
-__delay_cycles(100);                  // Delay a short bit just to prevent
-                                      // possible unintended edge triggerings.
-P1IFG = 0;                            // Clear Port 1 GPIO interrup flags
+        if(diff <= 1) {                    // This high signal was less than 800us long,                          // '0'
+            index++;                      // which inidicates a '0' with NEC protocol.
+            buf <<= 1;                    // Add in a '0' bit to the buffer.
+        }
+        else if(diff <= 3) {              // This high signal is between 800us and 2ms,
+            index++;                      // which inidicates a '1' bt by NEC protocol.
+            buf <<= 1;                    // Add in a '1' bit to the buffer.
+            buf |= 1;
+        }
+        else if(diff <= 8) {              // This high signal is between 2ms and 6ms,
+            if(buf | index != 0) {        // which inidicates that this was the data header.
+                P1OUT |= BIT6;            // If buffer and index and not both set to zero,
+            }
+            index = 0;
+            buf = 0;
+        }                             // then this is an error condition, as these should
+    }                                  // be reset before data capture.
+    P1IFG = 0;                            // Clear Port 1 GPIO interrup flags
 }
