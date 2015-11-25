@@ -18,15 +18,11 @@ int index = 0;
 long timeCounter = 0;
 long resetCounter = 0;
 
-#define SERVO_PERIOD_COUNTS 400
+#define SERVO_PERIOD_COUNTS 40
 
-/*#define SERVO_POINT80 16
-#define SERVO_POINT50 30
-#define SERVO_POINT25 44*/
-
-#define SERVO_MINUS_30 24
-#define SERVO_NEUTRAL 30
-#define SERVO_PLUS_30 36
+#define SERVO_MINUS_45 2
+#define SERVO_NEUTRAL 3
+#define SERVO_PLUS_45 4
 
 int servo_count = 0;
 int low_servo = SERVO_NEUTRAL;
@@ -53,7 +49,7 @@ int main(void) {
 
     CCTL0 |= CCIE;
     TACTL = TASSEL_2 + MC_1;
-    TACCR0 = 700;
+    TACCR0 = 500;
 
     P1DIR |= BIT6;                        // UsingP1.6 for LED.
 
@@ -61,7 +57,7 @@ int main(void) {
     P1IES &= ~BIT0;                       // Set P1.0 to trigger on a rising edge
     P1IE |= BIT0 + BIT1;
 
-    P1DIR |= BIT5;
+    P1DIR |= BIT5; // servo PWM control
     P1DIR |= BIT3; // bit to look at amount of time taken by ISR's
 
     __delay_cycles(250000);
@@ -79,7 +75,7 @@ int main(void) {
 
         switch(buf) {                     // Perform some action based on the code
         case CHANNEL_UP:                  // sent by the TV remote.
-            set_servo_length(SERVO_MINUS_30);
+            set_servo_length(SERVO_MINUS_45);
         break;
 
         case CHANNEL_DOWN:
@@ -87,11 +83,13 @@ int main(void) {
         break;
 
         case VOLUME_UP:
-            set_servo_length(SERVO_PLUS_30);
+            set_servo_length(SERVO_PLUS_45);
         break;
 
         case VOLUME_DOWN:
-        P1OUT ^= BIT6;
+        P1OUT |= BIT6;
+        __delay_cycles(400000);
+        P1OUT &= ~BIT6;
         break;
         default:                           // Error condition. Read an invalid code.
         index = 0;
@@ -106,23 +104,23 @@ return 0;
 /* Increments timeCounter, which counts up with a 100us period. Used to decode IR. */
 #pragma vector=TIMER0_A0_VECTOR
 __interrupt void something(void) {
-    P1OUT |= BIT3;
+    P1OUT |= BIT5;
     timeCounter++;
-    if(servo_on) {
-        if(servo_count++ == low_servo) {
-            P1OUT &= ~BIT5;
-        }
-        else if(servo_count++ >= SERVO_PERIOD_COUNTS) {
-            servo_count = 0;
-            P1OUT |= BIT5;
-        }
+    servo_count++;
+
+    if(servo_count == low_servo) {
+        P1OUT &= ~BIT3;
     }
-    if(resetCounter++ == 30000) {
+    else if(servo_count == SERVO_PERIOD_COUNTS) {
+        servo_count = 0;
+        P1OUT |= BIT3;
+    }
+    if(resetCounter++ == 6000) {
         index = 0;
         buf = 0;
         resetCounter = 0;
     }
-    P1OUT &= ~BIT3;
+    P1OUT &= ~BIT5;
 }
 
 /* Reads the next data bit from IR sensor and stores it in a buffer.
@@ -146,16 +144,16 @@ __interrupt void button(void) {
     else if(P1IFG & BIT1 && !done) {      // Falling edge from IR receiver digital output.
         long diff = timeCounter;          // See how many 100us periods have gone by since
                                           // the previous rising edge.
-        if(diff <= 1) {                    // This high signal was less than 800us long,                          // '0'
+        if(diff <= 2) {                    // This high signal was less than 800us long,                          // '0'
             index++;                      // which inidicates a '0' with NEC protocol.
             buf <<= 1;                    // Add in a '0' bit to the buffer.
         }
-        else if(diff <= 3) {              // This high signal is between 800us and 2ms,
+        else if(diff <= 5) {              // This high signal is between 800us and 2ms,
             index++;                      // which inidicates a '1' bt by NEC protocol.
             buf <<= 1;                    // Add in a '1' bit to the buffer.
             buf |= 1;
         }
-        else if(diff <= 8) {              // This high signal is between 2ms and 6ms,
+        else if(diff <= 10) {              // This high signal is between 2ms and 6ms,
             if(buf | index != 0) {        // which inidicates that this was the data header.
                 P1OUT |= BIT6;            // If buffer and index and not both set to zero,
             }
