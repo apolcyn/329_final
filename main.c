@@ -5,6 +5,13 @@
 #define CHANNEL_UP 0x20df00ff
 #define CHANNEL_DOWN 0x20DF807F
 
+#define REMOTE_ONE 0x20DF8877
+#define REMOTE_TWO 0x20DF48B7
+#define REMOTE_THREE 0x205FC817
+#define REMOTE_FOUR 0x20DF28D7
+#define REMOTE_FIVE 0x20DFA857
+#define REMOTE_SIX 0x20DF6897
+
 #define ms_20        655   // 20.0 ms
 #define ms_0point75  25    // 0.75 ms
 #define ms_1point50  49    // 1.50 ms
@@ -20,9 +27,11 @@ long resetCounter = 0;
 
 #define SERVO_PERIOD_COUNTS 40
 
+#define SERVO_MINUS_90 1
 #define SERVO_MINUS_45 2
 #define SERVO_NEUTRAL 3
 #define SERVO_PLUS_45 4
+#define SERVO_PLUS_90 5
 
 int servo_count = 0;
 int low_servo = SERVO_NEUTRAL;
@@ -75,7 +84,7 @@ int main(void) {
 
         switch(buf) {                     // Perform some action based on the code
         case CHANNEL_UP:                  // sent by the TV remote.
-            set_servo_length(SERVO_MINUS_45);
+            set_servo_length(SERVO_MINUS_90);
         break;
 
         case CHANNEL_DOWN:
@@ -83,7 +92,7 @@ int main(void) {
         break;
 
         case VOLUME_UP:
-            set_servo_length(SERVO_PLUS_45);
+            set_servo_length(SERVO_PLUS_90);
         break;
 
         case VOLUME_DOWN:
@@ -91,6 +100,19 @@ int main(void) {
         __delay_cycles(400000);
         P1OUT &= ~BIT6;
         break;
+
+        case REMOTE_ONE:
+            set_servo_length(SERVO_MINUS_45);
+            break;
+
+        case REMOTE_TWO:
+            set_servo_length(SERVO_PLUS_45);
+            break;
+
+        case REMOTE_FOUR:
+            set_servo_length(SERVO_NEUTRAL);
+            break;
+
         default:                           // Error condition. Read an invalid code.
         index = 0;
         break;
