@@ -7,7 +7,7 @@
 
 #define REMOTE_ONE 0x20DF8877
 #define REMOTE_TWO 0x20DF48B7
-#define REMOTE_THREE 0x205FC817
+#define REMOTE_THREE 0x20DFC837
 #define REMOTE_FOUR 0x20DF28D7
 #define REMOTE_FIVE 0x20DFA857
 #define REMOTE_SIX 0x20DF6897
@@ -30,6 +30,7 @@
 int motor_duty_low = 0;
 int motor_duty_high = MOTOR_DUTY_HIGH_MAX;
 int motor_duty_count = 0;
+int motor_duty_state_tracker = 0;
 
 #define MOTOR_AIN_0 BIT0
 #define MOTOR_AIN_1 BIT1
@@ -63,8 +64,17 @@ int servo_degree_options[] = {SERVO_MINUS_90
 
 int servo_options_index = 2;
 int servo_count = 0;
-int low_servo = servo_degree_options[servo_options_index];
+int low_servo = SERVO_NEUTRAL;
 int servo_on = 0;
+
+int abs_value(int num) {
+    if(num < 0) {
+        return num * -1;
+    }
+    else {
+        return num;
+    }
+}
 
 /* Carries out some new motor action.
  *  */
@@ -84,22 +94,27 @@ void do_motor_action(int motor_action) {
         P2OUT &= ~(MOTOR_AIN_0 + MOTOR_AIN_1);
         P2OUT |= MOTOR_PWM_A;
         P2OUT |= MOTOR_STANDBY_A;
+        motor_duty_low = 0;
+        motor_duty_state_tracker = 0;
         break;
     case DRIVE_STANDBY:
+        do_motor_action(DRIVE_STOP);
         P2OUT &= ~MOTOR_STANDBY_A;
         break;
     case INCREASE_SPEED:
-        if(motor_duty_low == 0) {
+        if(motor_duty_state_tracker == 0) {
             do_motor_action(DRIVE_FORWARD);
-            motor_duty_low++;
         }
-        else if(motor_duty_low < MOTOR_DUTY_HIGH_MAX) {
-            motor_duty_low++;
+        if(motor_duty_state_tracker < MOTOR_DUTY_HIGH_MAX) {
+            motor_duty_low = abs_value(++motor_duty_state_tracker);
         }
         break;
     case DECREASE_SPEED:
-        if(motor_duty_low > 0) {
-            motor_duty_low--;
+        if(motor_duty_state_tracker == 0) {
+            do_motor_action(DRIVE_REVERSE);
+        }
+        if(motor_duty_state_tracker > -(MOTOR_DUTY_HIGH_MAX)) {
+            motor_duty_low = abs_value(--motor_duty_state_tracker);
         }
         break;
     default:
@@ -163,19 +178,20 @@ int main(void) {
             P1OUT &= ~BIT6;
             break;
 
-        case REMOTE_ONE:
+        case REMOTE_TWO:
             if(servo_degree_options > 0) {
                 set_servo_length(servo_degree_options[--servo_options_index]);
             }
             break;
 
-        case REMOTE_TWO:
-            if(servo_degree_options < NUM_SERVO_DEGREE_OPTIONS) {
+        case REMOTE_ONE:
+            if(servo_options_index < NUM_SERVO_DEGREE_OPTIONS) {
                 set_servo_length(servo_degree_options[++servo_options_index]);
             }
             break;
 
         case REMOTE_FOUR:
+            servo_options_index = 2;
             set_servo_length(SERVO_NEUTRAL);
             break;
 
