@@ -47,22 +47,19 @@ long resetCounter = 0;
 
 #define SERVO_PERIOD_COUNTS 40
 
-#define SERVO_MINUS_90 1
 #define SERVO_MINUS_45 2
 #define SERVO_NEUTRAL 3
 #define SERVO_PLUS_45 4
-#define SERVO_PLUS_90 5
 
-int servo_degree_options[] = {SERVO_MINUS_90
-        , SERVO_MINUS_45
+int servo_degree_options[] = {SERVO_MINUS_45
         , SERVO_NEUTRAL
         , SERVO_PLUS_45
-        , SERVO_PLUS_90
 };
 
-#define NUM_SERVO_DEGREE_OPTIONS 5
+#define SERVO_NEUTRAL_INDEX 1
+#define NUM_SERVO_DEGREE_OPTIONS 3
 
-int servo_options_index = 2;
+int servo_options_index = SERVO_NEUTRAL_INDEX;
 int servo_count = 0;
 int low_servo = SERVO_NEUTRAL;
 int servo_on = 0;
@@ -179,7 +176,7 @@ int main(void) {
             break;
 
         case REMOTE_TWO:
-            if(servo_degree_options > 0) {
+            if(servo_options_index > 0) {
                 set_servo_length(servo_degree_options[--servo_options_index]);
             }
             break;
@@ -191,7 +188,7 @@ int main(void) {
             break;
 
         case REMOTE_FOUR:
-            servo_options_index = 2;
+            servo_options_index = SERVO_NEUTRAL_INDEX;
             set_servo_length(SERVO_NEUTRAL);
             break;
 
