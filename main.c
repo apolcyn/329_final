@@ -17,6 +17,25 @@
 #define ms_1point50  49    // 1.50 ms
 #define ms_2point25  73    // 2.25 ms
 
+// actions to take on the main motor that drives the rear wheels
+#define DRIVE_FORWARD 0
+#define DRIVE_REVERSE 1
+#define DRIVE_STOP 2
+#define DRIVE_STANDBY 3
+#define INCREASE_SPEED 4
+#define DECREASE_SPEED 5
+
+#define MOTOR_DUTY_HIGH_MAX 4
+
+int motor_duty_low = 0;
+int motor_duty_high = MOTOR_DUTY_HIGH_MAX;
+int motor_duty_count = 0;
+
+#define MOTOR_AIN_0 BIT0
+#define MOTOR_AIN_1 BIT1
+#define MOTOR_PWM_A BIT2
+#define MOTOR_STANDBY_A BIT3
+
 #define RESET_COUNT = 30000
 
 int done = 1;
@@ -33,9 +52,60 @@ long resetCounter = 0;
 #define SERVO_PLUS_45 4
 #define SERVO_PLUS_90 5
 
+int servo_degree_options[] = {SERVO_MINUS_90
+        , SERVO_MINUS_45
+        , SERVO_NEUTRAL
+        , SERVO_PLUS_45
+        , SERVO_PLUS_90
+};
+
+#define NUM_SERVO_DEGREE_OPTIONS 5
+
+int servo_options_index = 2;
 int servo_count = 0;
-int low_servo = SERVO_NEUTRAL;
+int low_servo = servo_degree_options[servo_options_index];
 int servo_on = 0;
+
+/* Carries out some new motor action.
+ *  */
+void do_motor_action(int motor_action) {
+    switch(motor_action) {
+    case DRIVE_FORWARD:
+        P2OUT |= MOTOR_AIN_0;
+        P2OUT &= ~MOTOR_AIN_1;
+        P2OUT |= MOTOR_STANDBY_A;
+        break;
+    case DRIVE_REVERSE:
+        P2OUT &= ~MOTOR_AIN_0;
+        P2OUT |= MOTOR_AIN_1;
+        P2OUT |= MOTOR_STANDBY_A;
+        break;
+    case DRIVE_STOP:
+        P2OUT &= ~(MOTOR_AIN_0 + MOTOR_AIN_1);
+        P2OUT |= MOTOR_PWM_A;
+        P2OUT |= MOTOR_STANDBY_A;
+        break;
+    case DRIVE_STANDBY:
+        P2OUT &= ~MOTOR_STANDBY_A;
+        break;
+    case INCREASE_SPEED:
+        if(motor_duty_low == 0) {
+            do_motor_action(DRIVE_FORWARD);
+            motor_duty_low++;
+        }
+        else if(motor_duty_low < MOTOR_DUTY_HIGH_MAX) {
+            motor_duty_low++;
+        }
+        break;
+    case DECREASE_SPEED:
+        if(motor_duty_low > 0) {
+            motor_duty_low--;
+        }
+        break;
+    default:
+        break;
+    }
+}
 
 void set_servo_length(int duty_cycle) {
     servo_count = 0;
@@ -74,6 +144,10 @@ int main(void) {
 
     __enable_interrupt();
 
+    P2DIR |= BIT0 + BIT1 + BIT2 + BIT3;
+
+    do_motor_action(DRIVE_FORWARD);
+
     servo_on = 1;
 
     while(1) {
@@ -83,66 +157,77 @@ int main(void) {
         done = 1;                         // that the next faling edge is not a data bit.
 
         switch(buf) {                     // Perform some action based on the code
-        case CHANNEL_UP:                  // sent by the TV remote.
-            set_servo_length(SERVO_MINUS_90);
-        break;
-
-        case CHANNEL_DOWN:
-            set_servo_length(SERVO_NEUTRAL);
-        break;
-
-        case VOLUME_UP:
-            set_servo_length(SERVO_PLUS_90);
-        break;
-
-        case VOLUME_DOWN:
-        P1OUT |= BIT6;
-        __delay_cycles(400000);
-        P1OUT &= ~BIT6;
-        break;
+        case VOLUME_DOWN:                 // sent by the TV remote.
+            P1OUT |= BIT6;
+            __delay_cycles(400000);
+            P1OUT &= ~BIT6;
+            break;
 
         case REMOTE_ONE:
-            set_servo_length(SERVO_MINUS_45);
+            if(servo_degree_options > 0) {
+                set_servo_length(servo_degree_options[--servo_options_index]);
+            }
             break;
 
         case REMOTE_TWO:
-            set_servo_length(SERVO_PLUS_45);
+            if(servo_degree_options < NUM_SERVO_DEGREE_OPTIONS) {
+                set_servo_length(servo_degree_options[++servo_options_index]);
+            }
             break;
 
         case REMOTE_FOUR:
             set_servo_length(SERVO_NEUTRAL);
             break;
 
+        case REMOTE_FIVE:
+            do_motor_action(DRIVE_STOP);
+            break;
+
+        case REMOTE_THREE:
+            do_motor_action(INCREASE_SPEED);
+            break;
+
+        case REMOTE_SIX:
+            do_motor_action(DECREASE_SPEED);
+            break;
+
         default:                           // Error condition. Read an invalid code.
-        index = 0;
-        break;
+            index = 0;
+            break;
         }
     }
-    P1IFG = 0;
-
-return 0;
+    return 0;
 }
 
 /* Increments timeCounter, which counts up with a 100us period. Used to decode IR. */
 #pragma vector=TIMER0_A0_VECTOR
 __interrupt void something(void) {
-    P1OUT |= BIT5;
     timeCounter++;
     servo_count++;
 
     if(servo_count == low_servo) {
         P1OUT &= ~BIT3;
     }
-    else if(servo_count == SERVO_PERIOD_COUNTS) {
+    if(servo_count == SERVO_PERIOD_COUNTS) {
         servo_count = 0;
         P1OUT |= BIT3;
     }
+
+    if(motor_duty_count == MOTOR_DUTY_HIGH_MAX) {
+        motor_duty_count = 0;
+        P2OUT |= MOTOR_PWM_A;
+    }
+    if(motor_duty_count == motor_duty_low) {
+        P2OUT &= ~MOTOR_PWM_A;
+    }
+
+    motor_duty_count++;
+
     if(resetCounter++ == 6000) {
         index = 0;
         buf = 0;
         resetCounter = 0;
     }
-    P1OUT &= ~BIT5;
 }
 
 /* Reads the next data bit from IR sensor and stores it in a buffer.
