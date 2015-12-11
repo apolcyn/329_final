@@ -1,10 +1,9 @@
 #include <msp430.h>
 
-#define VOLUME_UP 0x20DF40BF
-#define VOLUME_DOWN 0x20DFC03F
+#define VOLUME_UP 0x20DF40BF      // 32 bit values of commands sent LG TV
+#define VOLUME_DOWN 0x20DFC03F    // remote for different button presses.
 #define CHANNEL_UP 0x20df00ff
 #define CHANNEL_DOWN 0x20DF807F
-
 #define REMOTE_ONE 0x20DF8877
 #define REMOTE_TWO 0x20DF48B7
 #define REMOTE_THREE 0x20DFC837
@@ -12,12 +11,8 @@
 #define REMOTE_FIVE 0x20DFA857
 #define REMOTE_SIX 0x20DF6897
 
-#define ms_20        655   // 20.0 ms
-#define ms_0point75  25    // 0.75 ms
-#define ms_1point50  49    // 1.50 ms
-#define ms_2point25  73    // 2.25 ms
-
-// actions to take on the main motor that drives the rear wheels
+// Enum values of different actions for the main motor
+// that drives the rear wheels to perform.
 #define DRIVE_FORWARD 0
 #define DRIVE_REVERSE 1
 #define DRIVE_STOP 2
@@ -25,44 +20,63 @@
 #define INCREASE_SPEED 4
 #define DECREASE_SPEED 5
 
+// Number of clock ticks in entire PWM period for
+// motors that drive the rear wheels.
 #define MOTOR_DUTY_HIGH_MAX 4
 
-int motor_duty_low = 0;
-int motor_duty_high = MOTOR_DUTY_HIGH_MAX;
-int motor_duty_count = 0;
-int motor_duty_state_tracker = 0;
+int motor_duty_low = 0;                    // Clock tick number in a PWM
+                                           // cycle at which duty cycle line goes low.
 
-#define MOTOR_AIN_0 BIT0
-#define MOTOR_AIN_1 BIT1
+int motor_duty_high = MOTOR_DUTY_HIGH_MAX; // Total number of clock ticks
+                                           // in a PWM duty cycle.
+
+int motor_duty_count = 0;                  // Number of clock ticks that have
+                                           // gone by so far in the current PWM cycle.
+
+int motor_duty_state_tracker = 0;          // A state variable to keep track of
+                                           // what direction an speed the motors
+                                           // are moving at.
+
+#define MOTOR_AIN_0 BIT0                   // P1 ports of outputs to H-bridge
+#define MOTOR_AIN_1 BIT1                   // that drives the rear motors.
 #define MOTOR_PWM_A BIT2
 #define MOTOR_STANDBY_A BIT3
 
-#define RESET_COUNT = 30000
+#define RESET_COUNT = 30000                // Clock tick number at which the IR
+                                           // buffers are cleared and reset. Used to
+                                           // recover from errors in IR decoding.
+                                           // This resets it every three seconds.
 
-int done = 1;
-long buf = 0;
-int index = 0;
-long timeCounter = 0;
-long resetCounter = 0;
+int done = 1;                              // Flag to tell when a 32 bit command from
+                                           //  a remote has been received.
+long buf = 0;  // Buffer that stores the 32 bit remote command as it gets received.
+int index = 0; // Current bit that we're on, when receiving a remote command.
+long timeCounter = 0;  // A number used to record the number of clock ticks that
+                       // the last bit took, when decoding IR.
+long resetCounter = 0; // Value that increments on each clock tick
+                       // and resets the IR buffers when it reaches its max.
 
-#define SERVO_PERIOD_COUNTS 40
+#define SERVO_PERIOD_COUNTS 40   // Number of clock ticks in the servo's PWM cycle.
 
+// Number of clock ticks of different duty cycles
+// for servo control.
 #define SERVO_MINUS_45 2
 #define SERVO_NEUTRAL 3
 #define SERVO_PLUS_45 4
 
-int servo_degree_options[] = {SERVO_MINUS_45
-        , SERVO_NEUTRAL
+int servo_degree_options[] = {SERVO_MINUS_45   // Array that's used to shift between
+        , SERVO_NEUTRAL                        // servo positions.
         , SERVO_PLUS_45
 };
 
-#define SERVO_NEUTRAL_INDEX 1
-#define NUM_SERVO_DEGREE_OPTIONS 3
+#define SERVO_NEUTRAL_INDEX 1                // PWM servo duty cycle for neutral position.
+#define NUM_SERVO_DEGREE_OPTIONS 3           // Number of options servo has for positions.
 
-int servo_options_index = SERVO_NEUTRAL_INDEX;
-int servo_count = 0;
-int low_servo = SERVO_NEUTRAL;
-int servo_on = 0;
+int servo_options_index = SERVO_NEUTRAL_INDEX;   // Index into servo_options array.
+int servo_count = 0;                             // Clock counter for servo PWM duty cycle.
+int low_servo = SERVO_NEUTRAL;                   // Clock tick in PWM cycle where
+                                                 // line goes low.
+int servo_on = 0;                                // Flag to tell if servo is on or not.
 
 int abs_value(int num) {
     if(num < 0) {
@@ -119,6 +133,9 @@ void do_motor_action(int motor_action) {
     }
 }
 
+/* Sets the length of the high part of the servo's duty cycle,
+ * which controls the position of the servo.
+ */
 void set_servo_length(int duty_cycle) {
     servo_count = 0;
     low_servo = duty_cycle;
@@ -169,39 +186,40 @@ int main(void) {
         done = 1;                         // that the next faling edge is not a data bit.
 
         switch(buf) {                     // Perform some action based on the code
-        case VOLUME_DOWN:                 // sent by the TV remote.
+                                          // sent by the TV remote.
+        case VOLUME_DOWN:                 // Simple LED toggle indicates that system is working.
             P1OUT |= BIT6;
             __delay_cycles(400000);
             P1OUT &= ~BIT6;
             break;
 
-        case REMOTE_TWO:
+        case REMOTE_TWO:                      // Turn left if possible
             if(servo_options_index > 0) {
                 set_servo_length(servo_degree_options[--servo_options_index]);
             }
             break;
 
-        case REMOTE_ONE:
+        case REMOTE_ONE:                      // Turn right if possible
             if(servo_options_index < NUM_SERVO_DEGREE_OPTIONS) {
                 set_servo_length(servo_degree_options[++servo_options_index]);
             }
             break;
 
-        case REMOTE_FOUR:
+        case REMOTE_FOUR:                      // Set servo to a neutral position
             servo_options_index = SERVO_NEUTRAL_INDEX;
             set_servo_length(SERVO_NEUTRAL);
             break;
 
-        case REMOTE_FIVE:
+        case REMOTE_FIVE:                     // Stop the rear wheel motors.
             do_motor_action(DRIVE_STOP);
             break;
 
-        case REMOTE_THREE:
-            do_motor_action(INCREASE_SPEED);
+        case REMOTE_THREE:                     // Make the vehicle go more in the
+            do_motor_action(INCREASE_SPEED);   // "forwards" direction.
             break;
 
-        case REMOTE_SIX:
-            do_motor_action(DECREASE_SPEED);
+        case REMOTE_SIX:                     // Make the vehicle go more in the
+            do_motor_action(DECREASE_SPEED); // "reverse" direction.
             break;
 
         default:                           // Error condition. Read an invalid code.
@@ -218,7 +236,7 @@ __interrupt void something(void) {
     timeCounter++;
     servo_count++;
 
-    if(servo_count == low_servo) {
+    if(servo_count == low_servo) {                // Handle the PWM cycle of the servo.
         P1OUT &= ~BIT3;
     }
     if(servo_count == SERVO_PERIOD_COUNTS) {
@@ -226,8 +244,8 @@ __interrupt void something(void) {
         P1OUT |= BIT3;
     }
 
-    if(motor_duty_count == MOTOR_DUTY_HIGH_MAX) {
-        motor_duty_count = 0;
+    if(motor_duty_count == MOTOR_DUTY_HIGH_MAX) {  // Handle the PWM cycle of the
+        motor_duty_count = 0;                      // rear wheel motors.
         P2OUT |= MOTOR_PWM_A;
     }
     if(motor_duty_count == motor_duty_low) {
@@ -236,9 +254,9 @@ __interrupt void something(void) {
 
     motor_duty_count++;
 
-    if(resetCounter++ == 6000) {
-        index = 0;
-        buf = 0;
+    if(resetCounter++ == 6000) {                   // Reset the IR sensor buffer
+        index = 0;                                 // every three seconds to recover
+        buf = 0;                                   // from potential errors.
         resetCounter = 0;
     }
 }
