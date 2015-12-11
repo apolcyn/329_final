@@ -113,18 +113,20 @@ void do_motor_action(int motor_action) {
         P2OUT &= ~MOTOR_STANDBY_A;
         break;
     case INCREASE_SPEED:
-        if(motor_duty_state_tracker == 0) {
+        if(motor_duty_state_tracker == 0) {   // Flip to "forwards" if stopped.
             do_motor_action(DRIVE_FORWARD);
         }
         if(motor_duty_state_tracker < MOTOR_DUTY_HIGH_MAX) {
+            // Speed up in "forwards" if possible.
             motor_duty_low = abs_value(++motor_duty_state_tracker);
         }
         break;
     case DECREASE_SPEED:
-        if(motor_duty_state_tracker == 0) {
+        if(motor_duty_state_tracker == 0) {   // Flip to "reverse" if stopped.
             do_motor_action(DRIVE_REVERSE);
         }
         if(motor_duty_state_tracker > -(MOTOR_DUTY_HIGH_MAX)) {
+            // Speed up in "backwards" if possible.
             motor_duty_low = abs_value(--motor_duty_state_tracker);
         }
         break;
@@ -173,14 +175,16 @@ int main(void) {
 
     __enable_interrupt();
 
-    P2DIR |= BIT0 + BIT1 + BIT2 + BIT3;
+    P2DIR |= BIT0 + BIT1 + BIT2 + BIT3;   // USing lower nibble of P2 to control
+                                          // the H-bridge motor controller of rear wheels.
 
-    do_motor_action(DRIVE_FORWARD);
-
+    do_motor_action(DRIVE_FORWARD);       // Start out in the "forwards" direction,
+                                          // but still stopped.
     servo_on = 1;
 
     while(1) {
-    buf = 0;                          // Reset buffer.
+        buf = 0;                          // Reset buffer and the bit index into it.
+        index = 0;
         while(index < 32)                 // Sit here until we decode a 32-bit instruction
         ;                             // from TV remote.
         done = 1;                         // that the next faling edge is not a data bit.
@@ -222,7 +226,7 @@ int main(void) {
             do_motor_action(DECREASE_SPEED); // "reverse" direction.
             break;
 
-        default:                           // Error condition. Read an invalid code.
+        default:                           // Error condition. An invalid code was received.
             index = 0;
             break;
         }
@@ -262,7 +266,10 @@ __interrupt void something(void) {
 }
 
 /* Reads the next data bit from IR sensor and stores it in a buffer.
- * Using NEC protocol, so decodes '1's or '0's based on width of high signal.
+ * Implements receiver of NEC protocol transmissions
+ * , so this decodes '1's or '0's based on width of each 'high' section
+ * of the demodulated IR signal that is toggling.
+ * (Note that the IR receiver is idle 'high'.
  */
 #pragma vector=PORT1_VECTOR
 __interrupt void button(void) {
@@ -277,27 +284,28 @@ __interrupt void button(void) {
         if(done) {                        // Indicate that subsequent edges are of interest.
             done = 0;
         }
-        timeCounter = 0;                  // Reset time counter to zero on rising edge.
+        timeCounter = 0;                  // Reset time counter to zero on rising edge, so that
+                                          // we can count the length of time each one takes.
     }
     else if(P1IFG & BIT1 && !done) {      // Falling edge from IR receiver digital output.
         long diff = timeCounter;          // See how many 100us periods have gone by since
-                                          // the previous rising edge.
-        if(diff <= 2) {                    // This high signal was less than 800us long,                          // '0'
+                                          // the previous rising edge (stored in 'timeCounter').
+        if(diff <= 2) {                    // Previous high signal was less than 1ms long,                          // '0'
             index++;                      // which inidicates a '0' with NEC protocol.
             buf <<= 1;                    // Add in a '0' bit to the buffer.
         }
-        else if(diff <= 5) {              // This high signal is between 800us and 2ms,
-            index++;                      // which inidicates a '1' bt by NEC protocol.
+        else if(diff <= 5) {              // Previous high signal is between 1ms and 2.5ms long,
+            index++;                      // which inidicates a '1' by the NEC protocol.
             buf <<= 1;                    // Add in a '1' bit to the buffer.
             buf |= 1;
         }
-        else if(diff <= 10) {              // This high signal is between 2ms and 6ms,
+        else if(diff <= 10) {              // This high signal is between 2.5ms and 5ms,
             if(buf | index != 0) {        // which inidicates that this was the data header.
-                P1OUT |= BIT6;            // If buffer and index and not both set to zero,
-            }
-            index = 0;
+                P1OUT |= BIT6;            // If 'buffer' and 'index' are not cleared and set
+            }                             // to zero, then indicate error with LED.
+            index = 0;                    // Header comes first, so both should be reset.
             buf = 0;
-        }                             // then this is an error condition, as these should
-    }                                  // be reset before data capture.
+        }
+    }
     P1IFG = 0;                            // Clear Port 1 GPIO interrup flags
 }
